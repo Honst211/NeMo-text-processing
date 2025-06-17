@@ -162,7 +162,8 @@ class CardinalFst(GraphFst):
         )
         graph_hundred_billions = hundred_billions @ graph_hundred_billions_component
 
-        graph = pynini.union(
+        # First define the basic cardinal graph
+        graph_basic = pynini.union(
             graph_hundred_billions,
             graph_ten_billions,
             graph_thousand_million,
@@ -175,6 +176,19 @@ class CardinalFst(GraphFst):
             graph_hundred,
             graph_all,
             graph_zero,
+        )
+        
+        # Handle comma-separated numbers (e.g., 1,500 -> 一千五百)
+        # Remove commas and process as regular cardinal numbers
+        comma_separated_graph = pynini.cdrewrite(pynutil.delete(","), "", "", pynini.closure(pynini.union(NEMO_DIGIT, ",")))
+        
+        # First remove commas, then apply cardinal conversion
+        comma_cardinal_graph = comma_separated_graph @ graph_basic
+        
+        # Combine both comma-separated and regular numbers
+        graph = pynini.union(
+            comma_cardinal_graph,  # Add comma handling first (higher priority)
+            graph_basic
         )
         self.just_cardinals = graph.optimize()
 
