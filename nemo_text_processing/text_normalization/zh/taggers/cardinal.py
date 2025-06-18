@@ -164,7 +164,28 @@ class CardinalFst(GraphFst):
         )
         graph_hundred_billions = hundred_billions @ graph_hundred_billions_component
 
+        # 添加万亿级别支持（13位数字）
+        trillion = NEMO_DIGIT**13
+        trillion_position = NEMO_DIGIT**1  # 万亿位只有一位数字（1万亿）
+        trillion_position = trillion_position @ graph_digit_alt
+        graph_trillion_component = (trillion_position + pynutil.insert('万亿')) + pynini.union(
+            pynini.closure(pynutil.delete('0')),
+            graph_hundred_billions_component,
+            (pynutil.delete('0') + pynutil.insert('零') + graph_ten_billions_component),
+            (pynutil.delete('00') + pynutil.insert('零') + graph_thousand_million_component),
+            (pynutil.delete('000') + pynutil.insert('零') + graph_hundred_million_component),
+            (pynutil.delete('0000') + pynutil.insert('零') + graph_ten_million_component),
+            (pynutil.delete('00000') + pynutil.insert('零') + graph_million_component),
+            (pynutil.delete('000000') + pynutil.insert('零') + graph_hundred_thousand_component),
+            (pynutil.delete('0000000') + pynutil.insert('零') + graph_ten_thousand_component),
+            (pynutil.delete('00000000') + pynutil.insert('零') + graph_thousand_component),
+            (pynutil.delete('000000000') + pynutil.insert('零') + graph_hundred_component),
+            (pynini.closure(pynutil.delete('0')) + pynutil.insert('零') + graph_all),
+        )
+        graph_trillion = trillion @ graph_trillion_component
+
         graph = pynini.union(
+            graph_trillion,
             graph_hundred_billions,
             graph_ten_billions,
             graph_thousand_million,
@@ -178,13 +199,28 @@ class CardinalFst(GraphFst):
             graph_all_alt,
             graph_zero,
         )
-        self.just_cardinals = graph.optimize()
+        
+        # 添加对所有"数字+号"和"数字+日"格式的支持
+        # 现在所有带有号、日后缀的数字都由cardinal处理，而不是date模块
+        
+        # 定义支持的后缀
+        number_suffix = pynini.union('号', '日', '號')  # 包括繁体"號"
+        
+        # 所有数字（1-999）+ 后缀的组合
+        all_numbers = pynini.union(*[str(i) for i in range(1, 1000)])  # 1-999
+        all_numbers_with_suffix = all_numbers @ graph + number_suffix
+        
+        # 合并原有的cardinal图和新的"数字+后缀"处理
+        # 给"数字+后缀"格式更高的优先级（更小的权重）
+        graph_extended = pynutil.add_weight(all_numbers_with_suffix, -0.1) | graph
+        
+        self.just_cardinals = graph_extended.optimize()
         optional_sign = (
             pynutil.insert("negative: \"") + (pynini.accep("-") | pynini.cross("负", "-")) + pynutil.insert("\"")
         )
         final_graph = (
-            optional_sign + pynutil.insert(" ") + pynutil.insert("integer: \"") + graph + pynutil.insert("\"")
-        ) | (pynutil.insert("integer: \"") + graph + pynutil.insert("\""))
+            optional_sign + pynutil.insert(" ") + pynutil.insert("integer: \"") + graph_extended + pynutil.insert("\"")
+        ) | (pynutil.insert("integer: \"") + graph_extended + pynutil.insert("\""))
 
         self.with_sign = final_graph.optimize()
 

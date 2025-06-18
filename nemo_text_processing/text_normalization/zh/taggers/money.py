@@ -129,10 +129,10 @@ class MoneyFst(GraphFst):
         )
 
         graph = (
-            graph_regular_money
+            pynutil.add_weight(graph_decimal_money, -2.0)
+            | graph_regular_money
             | graph_units
             | pynutil.add_weight(graph_mandarin_money, -3.0)
-            | pynutil.add_weight(graph_decimal_money, -1.0)
         )
 
         final_graph = self.add_tokens(graph)

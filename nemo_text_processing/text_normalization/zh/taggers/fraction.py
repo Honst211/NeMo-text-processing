@@ -16,7 +16,7 @@
 import pynini
 from pynini.lib import pynutil
 
-from nemo_text_processing.text_normalization.zh.graph_utils import GraphFst
+from nemo_text_processing.text_normalization.zh.graph_utils import NEMO_CHAR, GraphFst
 from nemo_text_processing.text_normalization.zh.utils import get_abs_path
 
 
@@ -43,6 +43,7 @@ class FractionFst(GraphFst):
         graph_zero = pynini.string_file(get_abs_path("data/number/zero.tsv"))
 
         slash = pynutil.delete('/')
+        colon = pynutil.delete(':')  # 添加冒号分隔符支持比例格式
         morpheme = pynutil.delete('分之')
         suffix = pynini.union(
             "百",
@@ -77,6 +78,20 @@ class FractionFst(GraphFst):
             "仟亿",
         )
 
+        # 添加比例相关的上下文关键词
+        ratio_context_keywords = pynini.union(
+            "比例", "比率", "比值", "比重", "比", "占比", "配比", "倍率",
+            "分数", "分值", "分比", "得分", "比分", "积分",
+            "长宽", "长高", "宽高", "对比", "比较", "比赛"
+        )
+
+        # 构建上下文检测模式
+        context_prefix = (
+            ratio_context_keywords + 
+            pynini.closure(pynini.union("：", ":", "是", "为", NEMO_CHAR), 0, 3)  # 可选连接词
+        )
+        context_suffix = ratio_context_keywords
+
         integer_component = pynutil.insert('integer_part: \"') + graph_cardinals + pynutil.insert("\"")
         denominator_component = pynutil.insert("denominator: \"") + graph_cardinals + pynutil.insert("\"")
         numerator_component = pynutil.insert("numerator: \"") + graph_cardinals + pynutil.insert("\"")
@@ -91,6 +106,55 @@ class FractionFst(GraphFst):
         )  # 5又1/3
 
         graph_only_slash = numerator_component + slash + pynutil.insert(' ') + denominator_component
+        
+        # 按照用户4条规则实现精确的比例处理：
+        # 只处理明确超出时间范围的数字，其他情况交给时间模块
+        
+        # 超出时间范围的数字：小时>24 或 分钟>59
+        invalid_hour = pynini.union(*[str(i) for i in range(25, 1000)])  # 25以上 
+        invalid_minute = pynini.union(*[str(i) for i in range(60, 1000)])  # 60以上
+        any_number = pynini.union(*[str(i) for i in range(0, 1000)])
+        
+        # 构建明确的超出时间范围的比例格式
+        # 第一个数字 >= 25 或 第二个数字 >= 60
+        out_of_time_first = invalid_hour @ graph_cardinals  # 第一个数字超出小时范围
+        out_of_time_second = invalid_minute @ graph_cardinals  # 第二个数字超出分钟范围
+        any_cardinal = any_number @ graph_cardinals
+        
+        # 构建超出时间范围的比例格式
+        ratio_first_component = pynutil.insert("ratio_first: \"") + any_cardinal + pynutil.insert("\"")
+        ratio_second_component = pynutil.insert("ratio_second: \"") + any_cardinal + pynutil.insert("\"")
+        
+        ratio_first_out = pynutil.insert("ratio_first: \"") + out_of_time_first + pynutil.insert("\"")
+        ratio_second_out = pynutil.insert("ratio_second: \"") + out_of_time_second + pynutil.insert("\"")
+        
+        # 构建基本的比例格式
+        graph_ratio_basic = (
+            ratio_first_component + colon + pynutil.insert(' ') + ratio_second_component
+        )
+
+        # 只有明确超出时间范围的才处理为比例
+        graph_ratio_out_of_range = (
+            (ratio_first_out + colon + pynutil.insert(' ') + ratio_second_component) |
+            (ratio_first_component + colon + pynutil.insert(' ') + ratio_second_out)
+        )
+        
+        # 带上下文的比例格式
+        graph_ratio_with_context = (
+            pynutil.insert("context_prefix: \"") + context_prefix +  # 保存前缀关键词
+            pynutil.insert("\" ") +
+            graph_ratio_basic +  # 数字部分
+            pynini.closure(
+                pynutil.insert(" context_suffix: \"") + context_suffix + pynutil.insert("\""),
+                0, 1
+            )  # 可选后缀关键词
+        )
+        
+        # 合并所有比例格式，并设置权重
+        graph_ratio_colon = pynini.union(
+            pynutil.add_weight(graph_ratio_with_context, 0.1),  # 带上下文的比例优先级最高
+            pynutil.add_weight(graph_ratio_out_of_range, 0.2)   # 超出时间范围的比例次之
+        )
 
         graph_morpheme = (denominator_component + morpheme + pynutil.insert(' ') + numerator_component) | (
             integer_component
@@ -142,6 +206,7 @@ class FractionFst(GraphFst):
         graph = pynini.union(
             graph_with_integer,
             graph_only_slash,
+            graph_ratio_colon,  # 添加冒号比例格式
             graph_morpheme,
             graph_with_suffix,
             graph_decimal_percentage,
@@ -151,6 +216,7 @@ class FractionFst(GraphFst):
         graph_with_sign = (
             (graph_optional_sign + pynutil.insert(" ") + graph_with_integer)
             | (graph_optional_sign + pynutil.insert(" ") + graph_only_slash)
+            | (graph_optional_sign + pynutil.insert(" ") + graph_ratio_colon)  # 添加冒号比例格式
             | (graph_optional_sign + pynutil.insert(" ") + graph_morpheme)
             | (graph_optional_sign + pynutil.insert(" ") + graph_with_suffix)
             | (graph_optional_sign + pynutil.insert(" ") + graph_integer_percentage)

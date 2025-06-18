@@ -66,12 +66,48 @@ class FractionFst(GraphFst):
             + pynini.closure(NEMO_NOT_QUOTE)
             + pynutil.delete("\"")
         )
+        
+        # 添加比例格式的处理组件
+        ratio_first_part = (
+            pynutil.delete("ratio_first:")
+            + delete_space
+            + pynutil.delete("\"")
+            + pynini.closure(NEMO_NOT_QUOTE)
+            + pynutil.delete("\"")
+        )
+        ratio_second_part = (
+            pynutil.delete("ratio_second:")
+            + delete_space
+            + pynutil.delete("\"")
+            + pynini.closure(NEMO_NOT_QUOTE)
+            + pynutil.delete("\"")
+        )
+
+        # 添加上下文关键词处理
+        context_prefix = (
+            pynutil.delete("context_prefix: \"") + 
+            pynini.closure(NEMO_NOT_QUOTE) + 
+            pynutil.delete("\"")
+        )
+        context_suffix = (
+            pynutil.delete("context_suffix: \"") + 
+            pynini.closure(NEMO_NOT_QUOTE) + 
+            pynutil.delete("\"")
+        )
 
         graph_with_integer = (
             integer_part + delete_space + denominator_part + delete_space + pynutil.insert('分之') + numerator_part
         )
         graph_no_integer = denominator_part + delete_space + pynutil.insert('分之') + numerator_part
-        graph = graph_with_integer | graph_no_integer
+        
+        # 比例格式：比例1:2 -> 比例一比二
+        graph_ratio = (
+            pynini.closure(context_prefix + delete_space, 0, 1) +  # 可选前缀
+            ratio_first_part + delete_space + pynutil.insert('比') + ratio_second_part +
+            pynini.closure(delete_space + context_suffix, 0, 1)    # 可选后缀
+        )
+        
+        graph = graph_with_integer | graph_no_integer | graph_ratio
 
         graph_with_decimal = (
             denominator_part
@@ -83,7 +119,10 @@ class FractionFst(GraphFst):
         )
         graph_with_sign = sign_part + delete_space + (graph | graph_with_decimal)
 
-        final_graph = graph_with_sign | graph | graph_with_decimal
+        # 添加带符号的比例格式支持
+        graph_ratio_with_sign = sign_part + delete_space + graph_ratio
+
+        final_graph = graph_with_sign | graph | graph_with_decimal | graph_ratio_with_sign
         self.fraction = final_graph
 
         delete_tokens = self.delete_tokens(final_graph)

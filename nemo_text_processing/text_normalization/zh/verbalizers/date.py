@@ -45,6 +45,8 @@ class DateFst(GraphFst):
             + pynutil.delete("\"")
             + pynutil.insert("月")
         )
+        # 简化的day_component（只处理符号分隔的日期格式，如2024-01-15）
+        # 带有"号"和"日"后缀的情况现在由cardinal处理
         day_component = (
             pynutil.delete("day: ")
             + pynutil.delete("\"")

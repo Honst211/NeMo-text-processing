@@ -45,11 +45,31 @@ class DateFst(GraphFst):
         suffix = pynini.string_file(get_abs_path("data/date/suffixes.tsv"))
 
         delete_sign = pynutil.delete('/') | pynutil.delete('-') | pynutil.delete('.') | pynutil.delete('·')
-        delete_day = pynutil.delete('号') | pynutil.delete('號') | pynutil.delete('日')
+        
+        # 移除对"号"和"日"后缀的处理，这些情况将交给cardinal处理
+        # 只保留不会与cardinal冲突的日期标识符
 
+        # 严格限制有效日期范围：只有1-31的数字才被视为日期
+        # 构建有效的日期数字范围（1-31）
+        valid_day_numbers = pynini.union(*[str(i) for i in range(1, 32)])  # 1-31
+        valid_day_numbers |= pynini.union(*[f"{i:02d}" for i in range(1, 32)])  # 01-31
+        
+        # 添加更严格的数字匹配：确保数字不会超出1-31范围
+        # 明确排除32以上的数字，包括3位数
+        invalid_day_numbers = pynini.union(*[str(i) for i in range(32, 1000)])  # 32-999
+        # 排除所有3位数及以上（100+）
+        three_digit_numbers = pynini.union(*[str(i) for i in range(100, 1000)])
+        
+        # 严格验证：只接受1-31范围内的数字
+        valid_number_only = valid_day_numbers - invalid_day_numbers - three_digit_numbers
+        
+        # 严格的日期匹配：只在明确的日期上下文中识别日期
+        # 移除了对"号"和"日"后缀的处理，这些将交给cardinal处理
+        strict_day_match = valid_number_only @ day
+        
         # grammar for only year, month, or day
         # atleast accep two digit to distinguish from year used for time
-        # don't accept 日 to distinguish from day used fro time
+        # 不再单独处理带有"号"或"日"后缀的日期，这些交给cardinal处理
         only_year = (
             pynutil.insert("year: \"")
             + pynini.closure(graph_digit | graph_zero, 2)
@@ -57,15 +77,15 @@ class DateFst(GraphFst):
             + pynutil.insert("\"")
         )
         only_month = pynutil.insert("month: \"") + month + pynutil.delete('月') + pynutil.insert("\"")
-        only_day = pynutil.insert("day: \"") + day + delete_day + pynutil.insert("\"")
-        # gh_1
-        graph_only_date = only_year | only_month | only_day
+        # 移除only_day的定义，不再单独处理日期
+        # gh_1 - 只保留年和月的单独识别
+        graph_only_date = only_year | only_month
 
         year_month = only_year + pynutil.insert(' ') + only_month
-        month_day = only_month + pynutil.insert(' ') + only_day
-        graph_ymd = only_year + pynutil.insert(' ') + only_month + pynutil.insert(' ') + only_day
+        # 移除包含only_day的组合，这些情况将交给cardinal处理
+        # 现在只保留年月组合
         # gh_2
-        graph_combination = year_month | month_day | graph_ymd
+        graph_combination = year_month
 
         year_component = (
             pynutil.insert("year: \"")
@@ -74,9 +94,15 @@ class DateFst(GraphFst):
             + pynutil.insert("\"")
         )
         month_component = pynutil.insert("month: \"") + month + delete_sign + pynutil.insert("\"")
-        day_component = pynutil.insert("day: \"") + day + pynutil.insert("\"")
-        # gp_3
-        graph_sign = year_component + pynutil.insert(' ') + month_component + pynutil.insert(' ') + day_component
+        
+        # 对于符号分隔的日期格式（如2024-01-15），保持完整的年月日格式
+        # 这是唯一明确的日期标识格式，不会与cardinal冲突
+        day_component_sign_separated = (
+            pynutil.insert("day: \"") + strict_day_match + pynutil.insert("\"")
+        )
+        
+        # gp_3 - 只处理完整的年-月-日格式
+        graph_sign = year_component + pynutil.insert(' ') + month_component + pynutil.insert(' ') + day_component_sign_separated
         # gp_1+2+3
         graph_all = graph_only_date | graph_sign | graph_combination
 
@@ -89,12 +115,12 @@ class DateFst(GraphFst):
             | pynini.accep('纪元前')
         )
         prefix_component = pynutil.insert("era: \"") + prefix + pynutil.insert("\"")
-        # gp_prefix+(1,2,3)
-        graph_prefix = prefix_component + pynutil.insert(' ') + (graph_ymd | year_month | only_year)
+        # gp_prefix+(1,2,3) - 移除graph_ymd，只保留年月组合和单独年份
+        graph_prefix = prefix_component + pynutil.insert(' ') + (year_month | only_year)
 
         suffix_component = pynutil.insert("era: \"") + suffix + pynutil.insert("\"")
-        # gp_suffix +(1,2,3)
-        graph_suffix = (graph_ymd | year_month | only_year) + pynutil.insert(' ') + suffix_component
+        # gp_suffix +(1,2,3) - 移除graph_ymd，只保留年月组合和单独年份
+        graph_suffix = (year_month | only_year) + pynutil.insert(' ') + suffix_component
         # gp_4
         graph_affix = graph_prefix | graph_suffix
 
@@ -122,7 +148,9 @@ class DateFst(GraphFst):
 
         graph_range_final = graph_source | graph_goal
 
-        final_graph = pynutil.add_weight(graph, -2.0) | graph_range_final
+        # 移除内部高优先级权重，避免错误匹配超出范围的数字
+        # 原代码: final_graph = pynutil.add_weight(graph, -2.0) | graph_range_final
+        final_graph = graph | graph_range_final
 
         self.final_graph = final_graph.optimize()
         self.fst = self.add_tokens(self.final_graph).optimize()

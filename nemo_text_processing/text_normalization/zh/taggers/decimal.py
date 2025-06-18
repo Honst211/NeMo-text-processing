@@ -78,9 +78,17 @@ class DecimalFst(GraphFst):
 
         graph_integer = pynutil.insert('integer_part: \"') + cardinal_before_decimal + pynutil.insert("\"")
 
+        # 修复小数部分：每个数字单独读出，不组合成大数字
+        # 创建单个数字的映射（包括零）
+        single_digit = cardinal_after_decimal | zero
+        
+        # 小数部分：每个数字之间用空格分隔，逐位读出
+        # 例如：14159 → "一 四 一 五 九" 而不是 "一万四千一百五十九"
+        fractional_digits = single_digit + pynini.closure(pynutil.insert(" ") + single_digit)
+        
         graph_fraction = (
             pynutil.insert("fractional_part: \"")
-            + pynini.closure((pynini.closure(cardinal_after_decimal, 1) | (pynini.closure(zero, 1))), 1)
+            + fractional_digits
             + pynutil.insert("\"")
         )
         graph_decimal = graph_integer + pynutil.delete('.') + pynutil.insert(" ") + graph_fraction

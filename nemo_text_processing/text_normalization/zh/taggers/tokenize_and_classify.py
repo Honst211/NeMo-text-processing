@@ -27,6 +27,7 @@ from nemo_text_processing.text_normalization.zh.taggers.measure import MeasureFs
 from nemo_text_processing.text_normalization.zh.taggers.money import MoneyFst
 from nemo_text_processing.text_normalization.zh.taggers.ordinal import OrdinalFst
 from nemo_text_processing.text_normalization.zh.taggers.punctuation import PunctuationFst
+from nemo_text_processing.text_normalization.zh.taggers.telephone import TelephoneFst
 from nemo_text_processing.text_normalization.zh.taggers.time import TimeFst
 from nemo_text_processing.text_normalization.zh.taggers.whitelist import WhiteListFst
 from nemo_text_processing.text_normalization.zh.taggers.word import WordFst
@@ -73,19 +74,21 @@ class ClassifyFst(GraphFst):
             money = MoneyFst(cardinal=cardinal, deterministic=deterministic)
             measure = MeasureFst(cardinal=cardinal, decimal=decimal, fraction=fraction, deterministic=deterministic)
             ordinal = OrdinalFst(cardinal=cardinal, deterministic=deterministic)
+            telephone = TelephoneFst(deterministic=deterministic)
             whitelist = WhiteListFst(deterministic=deterministic)
             word = WordFst(deterministic=deterministic)
             punctuation = PunctuationFst(deterministic=deterministic)
 
             classify = pynini.union(
-                pynutil.add_weight(date.fst, 1.1),
-                pynutil.add_weight(fraction.fst, 1.0),
-                pynutil.add_weight(money.fst, 1.1),
+                pynutil.add_weight(telephone.fst, 0.8),  # 给telephone最高优先级，避免被cardinal捕获
+                pynutil.add_weight(fraction.fst, 0.8),  # 提高fraction优先级，处理超出时间范围的比例
+                pynutil.add_weight(time.fst, 0.9),      # time优先级略低于fraction，处理标准时间格式
+                pynutil.add_weight(money.fst, 0.85),     # 提高money优先级，确保货币小数被正确识别
+                pynutil.add_weight(decimal.fst, 0.8),    # 提高decimal优先级，确保小数被正确识别
+                pynutil.add_weight(cardinal.fst, 0.95),  # 进一步提高cardinal优先级，处理所有带号/日后缀的数字
                 pynutil.add_weight(measure.fst, 1.05),
-                pynutil.add_weight(time.fst, 1.1),
+                pynutil.add_weight(date.fst, 1.3),       # 进一步降低date优先级，只处理明确的日期格式
                 pynutil.add_weight(whitelist.fst, 1.1),
-                pynutil.add_weight(cardinal.fst, 1.1),
-                pynutil.add_weight(decimal.fst, 3.05),
                 pynutil.add_weight(ordinal.fst, 1.1),
                 pynutil.add_weight(punctuation.fst, 1.0),
                 pynutil.add_weight(word.fst, 100),
