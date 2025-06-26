@@ -25,6 +25,10 @@ from nemo_text_processing.text_normalization.ja.verbalizers.telephone import Tel
 from nemo_text_processing.text_normalization.ja.verbalizers.time import TimeFst
 from nemo_text_processing.text_normalization.ja.verbalizers.whitelist import WhiteListFst
 from nemo_text_processing.text_normalization.ja.verbalizers.word import WordFst
+from nemo_text_processing.text_normalization.ja.verbalizers.credit_card import CreditCardFst
+from nemo_text_processing.text_normalization.ja.verbalizers.address_number import AddressNumberFst
+from nemo_text_processing.text_normalization.ja.verbalizers.money import MoneyFst
+from nemo_text_processing.text_normalization.ja.verbalizers.serial_number import SerialNumberFst
 
 
 class VerbalizeFst(GraphFst):
@@ -47,11 +51,12 @@ class VerbalizeFst(GraphFst):
         word = WordFst(deterministic=deterministic)
         fraction = FractionFst(deterministic=deterministic)
         telephone = TelephoneFst(deterministic=deterministic)
-
-        # money = MoneyFst(decimal=decimal, deterministic=deterministic)
-        # measure = MeasureFst(cardinal=cardinal, decimal=decimal, fraction=fraction, deterministic=deterministic)
+        credit_card = CreditCardFst(deterministic=deterministic)
+        address_number = AddressNumberFst(deterministic=deterministic)
         time = TimeFst(deterministic=deterministic)
         whitelist = WhiteListFst(deterministic=deterministic)
+        money = MoneyFst(deterministic=deterministic)
+        serial_number = SerialNumberFst(deterministic=deterministic)
 
         graph = pynini.union(
             date.fst,
@@ -60,9 +65,13 @@ class VerbalizeFst(GraphFst):
             decimal.fst,
             fraction.fst,
             telephone.fst,
+            credit_card.fst,
+            address_number.fst,
             word.fst,
             time.fst,
             whitelist.fst,
+            money.fst,
+            serial_number.fst
         )
         graph = pynini.closure(delete_space) + graph + pynini.closure(delete_space)
 

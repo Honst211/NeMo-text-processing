@@ -22,8 +22,9 @@ from nemo_text_processing.text_normalization.ja.graph_utils import NEMO_NOT_QUOT
 class TimeFst(GraphFst):
     """
     Finite state transducer for verbalizing time e.g.
-
-
+        time { hours: "三" minutes: "三十" } -> 三時三十分
+        time { hours: "三" } -> 三時
+        time { suffix: "今夜" hours: "零" } -> 今夜零時
     """
 
     def __init__(self, deterministic: bool = True):
@@ -34,12 +35,18 @@ class TimeFst(GraphFst):
         second_component = pynutil.delete("seconds: \"") + pynini.closure(NEMO_NOT_QUOTE) + pynutil.delete("\"")
         division_component = pynutil.delete("suffix: \"") + pynini.closure(NEMO_NOT_QUOTE) + pynutil.delete("\"")
 
+        # Handle time components with proper formatting
         graph_basic_time = pynini.closure(division_component + pynutil.delete(" "), 0, 1) + (
-            (hour_component + pynutil.delete(" ") + minute_component + pynutil.delete(" ") + second_component)
-            | (hour_component + pynutil.delete(" ") + minute_component)
-            | hour_component
-            | minute_component
-            | second_component
+            # Full time with hours, minutes, and seconds
+            (hour_component + pynutil.delete(" ") + minute_component + pynutil.delete(" ") + second_component) |
+            # Hours and minutes
+            (hour_component + pynutil.delete(" ") + minute_component) |
+            # Hours only (for cases where minutes are 0)
+            hour_component |
+            # Minutes only
+            minute_component |
+            # Seconds only
+            second_component
         )
 
         final_graph = graph_basic_time

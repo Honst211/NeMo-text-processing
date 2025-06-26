@@ -24,7 +24,9 @@ class TimeFst(GraphFst):
     """
     Finite state transducer for classifying time, e.g.
         1時30分 -> time { hours: "一" minutes: "三十" }
+        3時00分 -> time { hours: "三" }
         今夜0時 -> time { suffix: "今夜" hours: "零" }
+        3時07分 -> time { hours: "三" minutes: "七" }
 
     Args:
         cardinal: CardinalFst
@@ -35,31 +37,57 @@ class TimeFst(GraphFst):
 
         graph_cardinal = cardinal.just_cardinals
 
+        # Cardinal for minutes and seconds which deletes an optional leading zero.
+        # This is to handle cases like "07分" which is read as "ななふん" (nanafun), not "ぜろななふん" (zeronanafun).
+        minute_second_cardinal = pynutil.delete("0").ques + graph_cardinal
+
         hour_clock = pynini.string_file(get_abs_path("data/time/hour.tsv"))
         minute_clock = pynini.string_file(get_abs_path("data/time/minute.tsv"))
         second_clock = pynini.string_file(get_abs_path("data/time/second.tsv"))
         division = pynini.string_file(get_abs_path("data/time/division.tsv"))
 
         division_component = pynutil.insert("suffix: \"") + division + pynutil.insert("\"")
+
+        # For hours, a leading zero is preserved, e.g., 0時 (reiji) is midnight.
         hour_component = (
             pynutil.insert("hours: \"")
             + (graph_cardinal | (graph_cardinal + pynini.cross(".", "点") + graph_cardinal))
             + (pynini.accep("時") | pynini.accep("時間") | pynini.accep("時頃"))
             + pynutil.insert("\"")
         )
-        minute_component = pynutil.insert("minutes: \"") + (
-            graph_cardinal | (graph_cardinal + pynini.cross(".", "点") + graph_cardinal)
-        ) + pynini.accep("分") + pynini.closure((pynini.accep("過ぎ") | pynini.accep("頃")), 0, 1) + pynutil.insert(
-            "\""
-        ) | (
+
+        # Regular minutes (not zero)
+        # For minutes and seconds, a leading zero is dropped.
+        # The part after the decimal point is read as a regular cardinal, e.g., 7.05 -> 七点零五.
+        regular_minutes = (
             pynutil.insert("minutes: \"")
-            + pynini.accep("半")
+            + (minute_second_cardinal | (minute_second_cardinal + pynini.cross(".", "点") + graph_cardinal))
+            + pynini.accep("分")
             + pynini.closure((pynini.accep("過ぎ") | pynini.accep("頃")), 0, 1)
             + pynutil.insert("\"")
         )
+
+        # Special case for zero minutes (00分) where the component is removed, e.g. 3時00分 -> 3時
+        zero_minutes = (
+            pynini.cross("00分", "") |  # Remove 00分 completely
+            pynini.cross("0分", "")  # Remove 0分 completely
+        )
+
+        minute_component = (
+            regular_minutes
+            | zero_minutes
+            | (
+                pynutil.insert("minutes: \"")
+                + pynini.accep("半")
+                + pynini.closure((pynini.accep("過ぎ") | pynini.accep("頃")), 0, 1)
+                + pynutil.insert("\"")
+            )
+        )
+
+        # For minutes and seconds, a leading zero is dropped.
         second_component = (
             pynutil.insert("seconds: \"")
-            + (graph_cardinal | (graph_cardinal + pynini.cross(".", "点") + graph_cardinal))
+            + (minute_second_cardinal | (minute_second_cardinal + pynini.cross(".", "点") + graph_cardinal))
             + pynini.accep("秒")
             + pynutil.insert("\"")
         )
@@ -81,13 +109,21 @@ class TimeFst(GraphFst):
             + pynutil.insert("時")
             + pynutil.insert("\"")
         )
-        minute_clock_component = (
+
+        # Regular minutes in clock format
+        regular_minute_clock = (
             pynutil.insert("minutes: \"")
             + pynutil.delete("0").ques
             + minute_clock
             + pynutil.insert("分")
             + pynutil.insert("\"")
         )
+
+        # Special case for zero minutes in clock format
+        zero_minute_clock = pynini.cross("00", "")  # Remove 00 completely
+
+        minute_clock_component = regular_minute_clock | zero_minute_clock
+
         second_clock_component = (
             pynutil.insert("seconds: \"")
             + pynutil.delete("0").ques

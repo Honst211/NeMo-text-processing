@@ -18,7 +18,13 @@ import os
 import pynini
 from pynini.lib import pynutil
 
-from nemo_text_processing.text_normalization.ja.graph_utils import GraphFst, generator_main
+from nemo_text_processing.text_normalization.ja.graph_utils import (
+    NEMO_SIGMA,
+    NEMO_CHAR,
+    NEMO_SPACE,
+    GraphFst,
+    generator_main
+)
 from nemo_text_processing.text_normalization.ja.taggers.cardinal import CardinalFst
 from nemo_text_processing.text_normalization.ja.taggers.date import DateFst
 from nemo_text_processing.text_normalization.ja.taggers.decimal import DecimalFst
@@ -29,6 +35,11 @@ from nemo_text_processing.text_normalization.ja.taggers.telephone import Telepho
 from nemo_text_processing.text_normalization.ja.taggers.time import TimeFst
 from nemo_text_processing.text_normalization.ja.taggers.whitelist import WhiteListFst
 from nemo_text_processing.text_normalization.ja.taggers.word import WordFst
+from nemo_text_processing.text_normalization.ja.taggers.preprocessor import PreProcessorFst
+from nemo_text_processing.text_normalization.ja.taggers.credit_card import CreditCardFst
+from nemo_text_processing.text_normalization.ja.taggers.address_number import AddressNumberFst
+from nemo_text_processing.text_normalization.ja.taggers.money import MoneyFst
+from nemo_text_processing.text_normalization.ja.taggers.serial_number import SerialNumberFst
 
 
 class ClassifyFst(GraphFst):
@@ -60,10 +71,13 @@ class ClassifyFst(GraphFst):
         if cache_dir is not None and cache_dir != "None":
             os.makedirs(cache_dir, exist_ok=True)
             whitelist_file = os.path.basename(whitelist) if whitelist else ""
-            far_file = os.path.join(cache_dir, f"zh_tn_{deterministic}_deterministic_{whitelist_file}_tokenize.far")
+            far_file = os.path.join(cache_dir, f"ja_tn_{deterministic}_deterministic_{whitelist_file}_tokenize.far")
         if not overwrite_cache and far_file and os.path.exists(far_file):
             self.fst = pynini.Far(far_file, mode="r")["tokenize_and_classify"]
         else:
+            # Initialize preprocessor first
+            preprocessor = PreProcessorFst(fullwidth_to_halfwidth=True)
+            
             cardinal = CardinalFst(deterministic=deterministic)
             date = DateFst(cardinal=cardinal, deterministic=deterministic)
             decimal = DecimalFst(cardinal=cardinal, deterministic=deterministic)
@@ -71,13 +85,21 @@ class ClassifyFst(GraphFst):
             fraction = FractionFst(cardinal=cardinal, deterministic=deterministic)
             ordinal = OrdinalFst(cardinal=cardinal, deterministic=deterministic)
             telephone = TelephoneFst(deterministic=deterministic)
+            credit_card = CreditCardFst(deterministic=deterministic)
+            address_number = AddressNumberFst(deterministic=deterministic)
+            serial_number = SerialNumberFst(deterministic=deterministic)
             whitelist = WhiteListFst(deterministic=deterministic)
             word = WordFst(deterministic=deterministic)
             punctuation = PunctuationFst(deterministic=deterministic)
+            money = MoneyFst(cardinal=cardinal, deterministic=deterministic)
 
             classify = pynini.union(
                 pynutil.add_weight(cardinal.fst, 0.9),     # Higher priority for numbers
+                pynutil.add_weight(address_number.fst, 1.1),  # Same priority as telephone/credit card
                 pynutil.add_weight(telephone.fst, 1.2),    # Lower priority for telephone 
+                pynutil.add_weight(credit_card.fst, 1.2),  # Same priority as telephone
+                pynutil.add_weight(money.fst, 0.8),        # Add money with medium priority
+                pynutil.add_weight(serial_number.fst, 1.5),        # Add money with medium priority
                 pynutil.add_weight(date.fst, 1.1),
                 pynutil.add_weight(fraction.fst, 1.0),
                 pynutil.add_weight(time.fst, 1.1),
@@ -88,10 +110,22 @@ class ClassifyFst(GraphFst):
                 pynutil.add_weight(word.fst, 100),
             )
 
-            token = pynutil.insert("tokens { ") + classify + pynutil.insert(" } ")
-            tagger = pynini.closure(token, 1)
+            
 
-            self.fst = tagger
+            # 简化token构建方式
+            token = pynutil.insert("tokens { ") + classify + pynutil.insert(" } ")
+            
+            # 使用更简单的方式构建tagger
+            tagger = pynini.closure(
+                token | pynini.cross(NEMO_SPACE, NEMO_SPACE),
+                1
+            )
+
+            # 先应用preprocessor
+            text = preprocessor.fst
+            
+            # 然后应用tagger
+            self.fst = pynini.compose(text, tagger).optimize()
 
             if far_file:
                 generator_main(far_file, {"tokenize_and_classify": self.fst})
