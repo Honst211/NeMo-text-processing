@@ -95,9 +95,9 @@ class ClassifyFst(GraphFst):
 
             classify = pynini.union(
                 pynutil.add_weight(cardinal.fst, 0.9),     # Higher priority for numbers
-                pynutil.add_weight(address_number.fst, 1.1),  # Same priority as telephone/credit card
-                pynutil.add_weight(telephone.fst, 1.2),    # Lower priority for telephone 
-                pynutil.add_weight(credit_card.fst, 1.2),  # Same priority as telephone
+                pynutil.add_weight(telephone.fst, 1.0),    # Higher priority for telephone 
+                pynutil.add_weight(address_number.fst, 1.2),  # Lower priority than telephone
+                pynutil.add_weight(credit_card.fst, 1.2),  # Same priority as address_number
                 pynutil.add_weight(money.fst, 0.8),        # Add money with medium priority
                 pynutil.add_weight(serial_number.fst, 1.5),        # Add money with medium priority
                 pynutil.add_weight(date.fst, 1.1),

@@ -124,14 +124,28 @@ class AddressNumberFst(GraphFst):
 
         kanji_style_number = process_kanji_number_func()
 
+        # Add constraint: address numbers should not start with 0
+        # This helps avoid conflicts with telephone numbers
+        non_zero_start_digit = pynini.difference(NEMO_DIGIT, pynini.accep("0")).optimize()
+        
+        # Create a pattern for numbers that don't start with 0
+        # This applies to all address number segments except postal codes
+        non_zero_kanji_number = pynini.compose(
+            non_zero_start_digit + pynini.closure(NEMO_DIGIT, 0),
+            kanji_style_number
+        ).optimize()
+
         # Define logic for the final segment of an address (e.g., room/bldg number)
         # This segment's reading style depends on whether it contains a "0"
 
-        # 1. An acceptor for any sequence of digits that does NOT contain "0"
+        # 1. An acceptor for any sequence of digits that does NOT contain "0" AND doesn't start with "0"
         digits_no_zero_seq = pynini.closure(self.no_zero_digit_accepter, 1).optimize()
 
-        # 2. An acceptor for any sequence of digits that MUST contain at least one "0"
-        digits_with_zero_seq = pynini.difference(pynini.closure(NEMO_DIGIT, 1), digits_no_zero_seq).optimize()
+        # 2. An acceptor for any sequence of digits that MUST contain at least one "0" BUT doesn't start with "0"
+        digits_with_zero_seq = pynini.compose(
+            non_zero_start_digit + pynini.closure(NEMO_DIGIT, 0),
+            pynini.difference(pynini.closure(NEMO_DIGIT, 1), digits_no_zero_seq)
+        ).optimize()
 
         # 3. Rule for final segments WITHOUT "0": apply kanji-style reading
         # e.g., "21" -> "二十一"
@@ -139,18 +153,18 @@ class AddressNumberFst(GraphFst):
 
         # START OF MODIFICATION
         # 4. Rule for final segments WITH "0": apply special address-style digit-by-digit reading ('0' -> 'マル')
-        # e.g., "809" -> "ハチマルキュー"
+        # e.g., "809" -> "ハチマルキュー" (but "009" would be rejected as it starts with 0)
         final_segment_with_zero = digits_with_zero_seq @ self.address_style_digit_sequence_reader
         # END OF MODIFICATION
 
         # 5. Combine them into a single rule for the final segment
         final_segment_logic = pynini.union(final_segment_no_zero, final_segment_with_zero).optimize()
         
-        # Address patterns using the new logic
-        # All segments except the last use kanji-style. The last uses the conditional final_segment_logic.
-        pattern1 = (kanji_style_number + self.separator + kanji_style_number + self.separator + kanji_style_number + self.separator + final_segment_logic).optimize()
-        pattern2 = (kanji_style_number + self.separator + kanji_style_number + self.separator + final_segment_logic).optimize()
-        pattern3 = (kanji_style_number + self.separator + final_segment_logic).optimize()
+        # Address patterns using the new logic with non-zero start constraint
+        # All segments except the last use non-zero kanji-style. The last uses the conditional final_segment_logic.
+        pattern1 = (non_zero_kanji_number + self.separator + non_zero_kanji_number + self.separator + non_zero_kanji_number + self.separator + final_segment_logic).optimize()
+        pattern2 = (non_zero_kanji_number + self.separator + non_zero_kanji_number + self.separator + final_segment_logic).optimize()
+        pattern3 = (non_zero_kanji_number + self.separator + final_segment_logic).optimize()
 
         # Postal code pattern (unchanged, as it was correct)
         # It correctly uses the 'default_style_digit_sequence_reader' which reads '0' as 'ゼロ'.
@@ -176,12 +190,13 @@ class AddressNumberFst(GraphFst):
         ).optimize()
         
         # Final union of all address patterns
+        # Note: final_segment_logic already has the non-zero start constraint built in
         number_part = pynini.union(
             pattern4_postal_code,
             pattern1, 
             pattern2, 
             pattern3,
-            final_segment_logic # Allows a single number segment, e.g. for a simple building number
+            final_segment_logic # Allows a single number segment, e.g. for a simple building number (non-zero start)
         ).optimize()
 
         final_graph = pynutil.insert("number_part: \"") + number_part + pynutil.insert("\"")
